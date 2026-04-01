@@ -16,12 +16,15 @@ interface AjaxHistoryResponse {
 /**
  * Extract the initial cursor from inline script on the history page.
  * Steam sets `g_historyCursor` as a JSON object in a script tag.
+ *
+ * Uses a terminator-anchored pattern (`};`) so nested objects don't trip up
+ * the match, and falls back gracefully if JSON.parse rejects the result.
  */
 export function extractInitialCursor(): string | null {
   const scripts = document.querySelectorAll('script:not([src])');
   for (const script of scripts) {
     const text = script.textContent ?? '';
-    const match = text.match(/g_historyCursor\s*=\s*({[^}]+})/);
+    const match = text.match(/g_historyCursor\s*=\s*(\{[\s\S]*?\});/);
     if (match) {
       try {
         const cursor = JSON.parse(match[1]);
@@ -68,6 +71,7 @@ async function fetchPage(cursor: string, sessionId: string): Promise<AjaxHistory
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params.toString(),
       credentials: 'include',
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (resp.status === 401 || resp.status === 403) {
@@ -134,19 +138,25 @@ export async function* paginateHistory(
 
     const response = await fetchPage(cursorJson, sessionId);
 
-    if (!response.success || !response.html) break;
+    if (response.success !== 1 || !response.html) break;
 
-    // Parse the HTML fragment returned by the AJAX call
-    const fragment = document.createElement('div');
-    fragment.innerHTML = response.html;
-    const pageTransactions = parseTransactionRows(fragment);
+    // Strip tags that cause network activity (img, link, script, etc.) before
+    // parsing, so DOMParser cannot trigger resource fetches for embedded URLs
+    // in Steam's response HTML.
+    const sanitized = response.html.replace(
+      /<(img|link|script|iframe|object|embed|audio|video|source|track|input)[^>]*\/?>/gi,
+      '',
+    );
+    const doc = new DOMParser().parseFromString(sanitized, 'text/html');
+    const pageTransactions = parseTransactionRows(doc.body);
 
     if (pageTransactions.length === 0) break;
 
-    allTransactions = allTransactions.concat(pageTransactions);
+    // push instead of concat to avoid O(n²) allocations across many pages
+    allTransactions.push(...pageTransactions);
 
     yield {
-      transactions: allTransactions,
+      transactions: [...allTransactions],
       currentPage: page,
       totalTransactions: allTransactions.length,
     };

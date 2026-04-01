@@ -1,11 +1,25 @@
-import { API_BASE, PARSER_VERSION } from '@/lib/constants';
+import { API_BASE, PARSER_VERSION, STORAGE_KEYS } from '@/lib/constants';
 import type { SubmitHistoryMessage, SubmitHistoryResponse, SelfUninstallResponse } from '@/lib/messages';
 import type { SubmissionPayload } from '@/lib/types';
 
+function isSubmitHistoryMessage(m: unknown): m is SubmitHistoryMessage {
+  if (typeof m !== 'object' || m === null) return false;
+  const msg = m as Record<string, unknown>;
+  return (
+    msg['type'] === 'SUBMIT_HISTORY' &&
+    typeof msg['steamId'] === 'string' &&
+    /^\d{17}$/.test(msg['steamId'] as string) &&
+    Array.isArray(msg['transactions'])
+  );
+}
+
 export default defineBackground(() => {
-  browser.runtime.onMessage.addListener((message, _sender) => {
-    if (message.type === 'SUBMIT_HISTORY') {
-      return handleSubmission(message as SubmitHistoryMessage);
+  browser.runtime.onMessage.addListener((message, sender) => {
+    // Only accept messages from this extension's own scripts
+    if (sender.id !== browser.runtime.id) return false;
+
+    if (isSubmitHistoryMessage(message)) {
+      return handleSubmission(message);
     }
     if (message.type === 'SELF_UNINSTALL') {
       return handleUninstall();
@@ -15,8 +29,10 @@ export default defineBackground(() => {
 });
 
 async function handleSubmission(message: SubmitHistoryMessage): Promise<SubmitHistoryResponse> {
-  const stored = await browser.storage.session.get(['token']);
-  const token = stored.token as string | undefined;
+  const stored = await browser.storage.session.get([STORAGE_KEYS.token]);
+  const token = typeof stored[STORAGE_KEYS.token] === 'string'
+    ? (stored[STORAGE_KEYS.token] as string)
+    : undefined;
 
   if (!token) {
     return { success: false, error: 'No extension token. Visit steamarchivist.com while logged in.' };
@@ -43,21 +59,23 @@ async function handleSubmission(message: SubmitHistoryMessage): Promise<SubmitHi
         'Authorization': `Bearer ext:${token}`,
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(60_000),
     });
 
     // Token is single-use — clear it regardless of outcome
-    await browser.storage.session.remove('token');
+    await browser.storage.session.remove(STORAGE_KEYS.token);
 
     if (!resp.ok) {
       const body = await resp.json().catch(() => null);
-      const detail = body?.detail?.message ?? body?.detail ?? `HTTP ${resp.status}`;
-      return { success: false, error: String(detail) };
+      const raw = body?.detail?.message ?? body?.detail;
+      const detail = typeof raw === 'string' ? raw : `HTTP ${resp.status}`;
+      return { success: false, error: detail };
     }
 
     const data = await resp.json();
     return { success: true, data: data.data };
   } catch (err) {
-    await browser.storage.session.remove('token');
+    await browser.storage.session.remove(STORAGE_KEYS.token);
     return { success: false, error: err instanceof Error ? err.message : 'Network error' };
   }
 }
