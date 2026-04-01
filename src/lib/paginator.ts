@@ -112,7 +112,7 @@ export async function* paginateHistory(
 ): AsyncGenerator<PaginationProgress> {
   // First batch: parse what's already on the page
   const initialRows = parseTransactionRows(document);
-  let allTransactions = [...initialRows];
+  const allTransactions = [...initialRows];
   let page = 1;
 
   yield { transactions: allTransactions, currentPage: page, totalTransactions: allTransactions.length };
