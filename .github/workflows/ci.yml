@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          # Read version from packageManager field in package.json if present,
+          # otherwise use latest stable.
+          version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # Enforce lockfile integrity — prevents supply-chain drift (DEP-2).
+      # Will fail if pnpm-lock.yaml is out of sync with package.json.
+      - name: Install dependencies (frozen)
+        run: pnpm install --frozen-lockfile
+
+      # Audit all dependencies for known CVEs (DEP-2).
+      # --audit-level=moderate fails the build on moderate+ severity findings.
+      - name: Audit dependencies
+        run: pnpm audit --audit-level=moderate
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build (Chrome)
+        run: pnpm build
+
+      - name: Build (Firefox)
+        run: pnpm build:firefox
