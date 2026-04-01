@@ -1,7 +1,10 @@
 import type { ParsedTransaction } from './types';
 
 const FORMULA_CHARS = new Set(['=', '+', '-', '@']);
-const HEADERS = ['Date', 'Game', 'Price', 'Type'];
+const HEADERS = ['Date', 'Game', 'Amount', 'Type'];
+
+// Currencies with no minor unit (zero decimal places)
+const ZERO_DECIMAL_CURRENCIES = new Set(['JPY', 'KRW', 'IDR', 'VND', 'CLP', 'ISK']);
 
 /**
  * Escape a cell value for CSV output.
@@ -21,22 +24,23 @@ function escapeCell(value: string): string {
  * Column order matches what the SteamArchivist CSV parser expects.
  */
 export function buildCsv(transactions: ParsedTransaction[]): string {
-  const lines = [HEADERS.join(',')];
+  // Pre-size to avoid repeated array resizing (PERF-SP-2).
+  const lines = new Array<string>(transactions.length + 1);
+  lines[0] = HEADERS.join(',');
 
-  for (const tx of transactions) {
+  for (let i = 0; i < transactions.length; i++) {
+    const tx = transactions[i];
+    const decimals = ZERO_DECIMAL_CURRENCIES.has(tx.currency) ? 0 : 2;
     const price = tx.amount !== 0
-      ? `${tx.currency} ${tx.amount.toFixed(2)}`
+      ? `${tx.currency} ${tx.amount.toFixed(decimals)}`
       : 'Free';
 
-    lines.push([
-      escapeCell(tx.date),
-      escapeCell(tx.gameName),
-      escapeCell(price),
-      escapeCell(tx.type),
-    ].join(','));
+    // Template literal avoids a per-row temporary array (PERF-SP-1).
+    lines[i + 1] = `${escapeCell(tx.date)},${escapeCell(tx.gameName)},${escapeCell(price)},${escapeCell(tx.type)}`;
   }
 
-  return lines.join('\n');
+  // RFC 4180 specifies CRLF as the line terminator for CSV files.
+  return lines.join('\r\n');
 }
 
 /**

@@ -56,15 +56,13 @@ function sleep(ms: number): Promise<void> {
 async function fetchPage(cursor: string, sessionId: string): Promise<AjaxHistoryResponse> {
   let lastError: Error | null = null;
 
+  // Params are fixed for the duration of this call — construct once outside the retry loop.
+  const params = new URLSearchParams({ cursor, sessionid: sessionId });
+
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     if (attempt > 0) {
       await sleep(RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1));
     }
-
-    const params = new URLSearchParams({
-      cursor,
-      sessionid: sessionId,
-    });
 
     const resp = await fetch(STEAM_AJAX_URL, {
       method: 'POST',
@@ -155,8 +153,9 @@ export async function* paginateHistory(
     // push instead of concat to avoid O(n²) allocations across many pages
     allTransactions.push(...pageTransactions);
 
+    // Yield the live array directly — callers must not mutate it (PERF-TC-1).
     yield {
-      transactions: [...allTransactions],
+      transactions: allTransactions,
       currentPage: page,
       totalTransactions: allTransactions.length,
     };

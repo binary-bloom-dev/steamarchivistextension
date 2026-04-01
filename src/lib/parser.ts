@@ -35,7 +35,7 @@ const CURRENCY_PREFIXES = Object.keys(CURRENCY_MAP).sort((a, b) => b.length - a.
  */
 export function parsePrice(raw: string): { amount: number; currency: string } | null {
   const trimmed = raw.trim();
-  if (!trimmed || trimmed.toLowerCase() === 'free') return null;
+  if (!trimmed || /^free$/i.test(trimmed)) return null;
 
   // Try each known currency prefix, longest first to avoid partial matches
   const prefixes = CURRENCY_PREFIXES;
