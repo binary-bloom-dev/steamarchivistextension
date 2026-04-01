@@ -18,13 +18,16 @@ const CURRENCY_MAP: Record<string, string> = {
   '₩': 'KRW',
   '₺': 'TRY',
   'zł': 'PLN',
-  'kr': 'NOK', // also SEK/DKK — ambiguous, but NOK is most common on Steam
+  'kr': 'NOK', // also SEK/DKK — ambiguous; NOK chosen as most common on Steam
   'CHF': 'CHF',
   '₱': 'PHP',
   '฿': 'THB',
   'RM': 'MYR',
   'Rp': 'IDR',
 };
+
+// Sorted longest-first so "CA$" matches before "$", etc. Computed once at module load.
+const CURRENCY_PREFIXES = Object.keys(CURRENCY_MAP).sort((a, b) => b.length - a.length);
 
 /**
  * Parse a price string like "$59.99" or "€19,99" into amount + currency.
@@ -35,7 +38,7 @@ export function parsePrice(raw: string): { amount: number; currency: string } | 
   if (!trimmed || trimmed.toLowerCase() === 'free') return null;
 
   // Try each known currency prefix, longest first to avoid partial matches
-  const prefixes = Object.keys(CURRENCY_MAP).sort((a, b) => b.length - a.length);
+  const prefixes = CURRENCY_PREFIXES;
 
   for (const prefix of prefixes) {
     if (trimmed.startsWith(prefix)) {
@@ -62,7 +65,11 @@ export function parsePrice(raw: string): { amount: number; currency: string } | 
 }
 
 /**
- * Parse a numeric amount string, handling both "1,234.56" and "1.234,56" formats.
+ * Parse a numeric amount string, handling both "1,234.56" (US) and "1.234,56" (European) formats.
+ *
+ * Disambiguation rule: a comma is a decimal separator only when exactly 2 digits follow it
+ * AND it appears after any period (or there is no period). Otherwise it is a thousands separator.
+ * This correctly handles "1,234" (US $1234) vs "19,99" (EU €19.99).
  */
 function parseAmount(raw: string): number | null {
   let cleaned = raw.replace(/[^\d.,-]/g, '');
@@ -71,11 +78,20 @@ function parseAmount(raw: string): number | null {
   const isNegative = cleaned.startsWith('-');
   if (isNegative) cleaned = cleaned.slice(1);
 
-  // European format: comma as decimal separator (e.g., "19,99" or "1.234,56")
-  if (cleaned.includes(',') && (cleaned.indexOf(',') > cleaned.lastIndexOf('.') || !cleaned.includes('.'))) {
+  const lastComma = cleaned.lastIndexOf(',');
+  const lastDot   = cleaned.lastIndexOf('.');
+
+  // European decimal: comma present, comes after any dot (or no dot), with exactly 2 trailing digits
+  const isEuropeanDecimal =
+    lastComma !== -1 &&
+    (lastComma > lastDot || lastDot === -1) &&
+    cleaned.length - lastComma - 1 === 2;
+
+  if (isEuropeanDecimal) {
+    // Strip thousands dots, then convert decimal comma to dot
     cleaned = cleaned.replace(/\./g, '').replace(',', '.');
   } else {
-    // US format: period as decimal, commas as thousands
+    // US format: commas are thousands separators
     cleaned = cleaned.replace(/,/g, '');
   }
 
