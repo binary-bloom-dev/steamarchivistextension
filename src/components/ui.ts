@@ -95,6 +95,29 @@ function injectStyles(): void {
       background: rgba(255, 152, 0, 0.15);
       color: #ffcc02;
     }
+
+    .${PREFIX}-cancel {
+      display: none;
+      margin-left: 10px;
+      padding: 10px 16px;
+      background: transparent;
+      color: #8f98a0;
+      border: 1px solid #4a5568;
+      border-radius: 2px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .${PREFIX}-cancel.active {
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .${PREFIX}-cancel:hover {
+      color: #c6d4df;
+      border-color: #8f98a0;
+    }
   `;
 
   document.head.appendChild(style);
@@ -107,13 +130,15 @@ export interface ExportUI {
   setStatus(type: 'success' | 'error' | 'warning', message: string): void;
   setButtonEnabled(enabled: boolean): void;
   setButtonText(text: string): void;
+  /** Show or hide the Cancel button. */
+  setCancelVisible(visible: boolean): void;
 }
 
 /**
  * Inject the export UI into the Steam purchase history page.
  * Placed near the top of the history table for visibility.
  */
-export function injectExportUI(onClick: () => void): ExportUI {
+export function injectExportUI(onClick: () => void, onCancel: () => void): ExportUI {
   injectStyles();
 
   const container = document.createElement('div');
@@ -124,6 +149,11 @@ export function injectExportUI(onClick: () => void): ExportUI {
   button.className = `${PREFIX}-button`;
   button.textContent = 'Export Full History to SteamArchivist';
   button.addEventListener('click', onClick);
+
+  const cancelButton = document.createElement('button');
+  cancelButton.className = `${PREFIX}-cancel`;
+  cancelButton.textContent = 'Cancel';
+  cancelButton.addEventListener('click', onCancel);
 
   const progress = document.createElement('div');
   progress.className = `${PREFIX}-progress`;
@@ -136,6 +166,7 @@ export function injectExportUI(onClick: () => void): ExportUI {
 
   const progressText = document.createElement('div');
   progressText.className = `${PREFIX}-progress-text`;
+  progressText.setAttribute('aria-live', 'polite');
 
   progressBar.appendChild(progressFill);
   progress.appendChild(progressBar);
@@ -143,8 +174,11 @@ export function injectExportUI(onClick: () => void): ExportUI {
 
   const status = document.createElement('div');
   status.className = `${PREFIX}-status`;
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'assertive');
 
   container.appendChild(button);
+  container.appendChild(cancelButton);
   container.appendChild(progress);
   container.appendChild(status);
 
@@ -165,8 +199,9 @@ export function injectExportUI(onClick: () => void): ExportUI {
     setProgress(page: number, count: number) {
       progress.classList.add('active');
       progressText.textContent = `Loading page ${page}... (${count} transactions found)`;
-      // Indeterminate-style — pulse between 20-80% since we don't know total pages
-      const width = Math.min(20 + (page * 5), 90);
+      // Asymptotic approach to 90%: always visually moving, never feels stuck
+      // regardless of how many pages there are.
+      const width = 90 * (1 - Math.exp(-page / 20));
       progressFill.style.width = `${width}%`;
     },
 
@@ -183,6 +218,14 @@ export function injectExportUI(onClick: () => void): ExportUI {
 
     setButtonText(text: string) {
       button.textContent = text;
+    },
+
+    setCancelVisible(visible: boolean) {
+      if (visible) {
+        cancelButton.classList.add('active');
+      } else {
+        cancelButton.classList.remove('active');
+      }
     },
   };
 }

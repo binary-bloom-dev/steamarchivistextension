@@ -17,19 +17,19 @@ function tx(overrides: Partial<ParsedTransaction> = {}): ParsedTransaction {
 describe('buildCsv', () => {
   it('includes the header row', () => {
     const csv = buildCsv([]);
-    expect(csv).toBe('Date,Game,Price,Type');
+    expect(csv).toBe('Date,Game,Amount,Type');
   });
 
   it('formats a basic transaction', () => {
     const csv = buildCsv([tx()]);
-    const lines = csv.split('\n');
+    const lines = csv.split('\r\n');
     expect(lines).toHaveLength(2);
     expect(lines[1]).toBe('"Jan 15, 2020","Test Game","USD 9.99","Purchase"');
   });
 
   it('formats free items', () => {
     const csv = buildCsv([tx({ amount: 0 })]);
-    const lines = csv.split('\n');
+    const lines = csv.split('\r\n');
     expect(lines[1]).toContain('"Free"');
   });
 
@@ -65,7 +65,7 @@ describe('buildCsv', () => {
       tx({ gameName: 'Game B', amount: 19.99 }),
       tx({ gameName: 'Game C', amount: 0 }),
     ]);
-    const lines = csv.split('\n');
+    const lines = csv.split('\r\n');
     expect(lines).toHaveLength(4); // header + 3 rows
   });
 
@@ -76,7 +76,7 @@ describe('buildCsv', () => {
 
   it('formats negative amounts for refunds', () => {
     const csv = buildCsv([tx({ amount: -9.99 })]);
-    const lines = csv.split('\n');
+    const lines = csv.split('\r\n');
     expect(lines[1]).toContain('"USD -9.99"');
   });
 });

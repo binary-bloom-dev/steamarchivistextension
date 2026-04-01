@@ -7,12 +7,6 @@ export interface ParsedTransaction {
   amount: number;
 }
 
-export interface PaginationResult {
-  transactions: ParsedTransaction[];
-  cursor: string | null;
-  hasMore: boolean;
-}
-
 export interface SubmissionPayload {
   steam_id: string;
   transactions: Array<{

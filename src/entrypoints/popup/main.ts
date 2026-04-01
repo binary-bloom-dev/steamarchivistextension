@@ -1,17 +1,29 @@
-const statusEl = document.getElementById('status')!;
+import { STORAGE_KEYS } from '@/lib/constants';
+
+const rawStatusEl = document.getElementById('status');
+if (!rawStatusEl) throw new Error('Popup HTML is missing #status element');
+const statusEl: HTMLElement = rawStatusEl;
 
 async function updateStatus(): Promise<void> {
-  const stored = await browser.storage.session.get(['token', 'acquired_at', 'expires_in']);
+  const stored = await browser.storage.session.get([
+    STORAGE_KEYS.token,
+    STORAGE_KEYS.acquiredAt,
+    STORAGE_KEYS.expiresIn,
+  ]);
 
-  if (stored.token) {
+  if (stored[STORAGE_KEYS.token]) {
     // Check if the token might be expired
-    const acquiredAt = stored.acquired_at as number | undefined;
-    const expiresIn = (stored.expires_in as number | undefined) ?? 600;
+    const acquiredAt = stored[STORAGE_KEYS.acquiredAt] as number | undefined;
+    const expiresIn = (stored[STORAGE_KEYS.expiresIn] as number | undefined) ?? 600;
 
     if (acquiredAt && Date.now() - acquiredAt > expiresIn * 1000) {
       statusEl.className = 'status unlinked';
       statusEl.textContent = 'Token expired. Visit steamarchivist.com while logged in to refresh.';
-      await browser.storage.session.remove(['token', 'acquired_at', 'expires_in']);
+      await browser.storage.session.remove([
+        STORAGE_KEYS.token,
+        STORAGE_KEYS.acquiredAt,
+        STORAGE_KEYS.expiresIn,
+      ]);
       return;
     }
 
