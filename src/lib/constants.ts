@@ -10,6 +10,11 @@ export const RETRY_BASE_DELAY_MS = 2000;
 
 export const PARSER_VERSION = '1.0.0';
 
+// Maximum acceptable length for an API-issued extension token (INPUT-2).
+// Prevents an oversized token from being stored in session storage or
+// sent as an Authorization header that exceeds server/browser limits.
+export const MAX_TOKEN_LENGTH = 512;
+
 // Namespaced session storage keys — prevents collisions with other extensions
 // or future features that might use the same plain-string keys.
 // Write access: site-bridge (token write), background (token clear)

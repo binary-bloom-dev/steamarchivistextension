@@ -1,4 +1,9 @@
 import { API_BASE, PARSER_VERSION, STORAGE_KEYS } from '@/lib/constants';
+
+/** Return true if the response advertises a JSON content type. */
+function isJsonResponse(resp: Response): boolean {
+  return (resp.headers.get('content-type') ?? '').includes('application/json');
+}
 import type { SubmitHistoryMessage, SubmitHistoryResponse, SelfUninstallResponse } from '@/lib/messages';
 import type { SubmissionPayload } from '@/lib/types';
 
@@ -66,10 +71,15 @@ async function handleSubmission(message: SubmitHistoryMessage): Promise<SubmitHi
     await browser.storage.session.remove(STORAGE_KEYS.token);
 
     if (!resp.ok) {
-      const body = await resp.json().catch(() => null);
+      // Only attempt JSON parse if the server says it's JSON (INPUT-1)
+      const body = isJsonResponse(resp) ? await resp.json().catch(() => null) : null;
       const raw = body?.detail?.message ?? body?.detail;
       const detail = typeof raw === 'string' ? raw : `HTTP ${resp.status}`;
       return { success: false, error: detail };
+    }
+
+    if (!isJsonResponse(resp)) {
+      return { success: false, error: 'Unexpected response type from server' };
     }
 
     const data = await resp.json();

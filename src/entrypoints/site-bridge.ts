@@ -8,7 +8,12 @@
  * This avoids any manual linking step — the extension "just works" once installed.
  */
 
-import { STORAGE_KEYS } from '@/lib/constants';
+import { STORAGE_KEYS, MAX_TOKEN_LENGTH } from '@/lib/constants';
+
+/** Return true if the response advertises a JSON content type. */
+function isJsonResponse(resp: Response): boolean {
+  return (resp.headers.get('content-type') ?? '').includes('application/json');
+}
 
 export default defineContentScript({
   matches: ['https://steamarchivist.com/*'],
@@ -33,7 +38,7 @@ export default defineContentScript({
         credentials: 'include',
         signal: AbortSignal.timeout(10_000),
       });
-      if (!csrfResp.ok) return;
+      if (!csrfResp.ok || !isJsonResponse(csrfResp)) return;
 
       const csrfData = await csrfResp.json();
       const csrfToken = csrfData?.data?.csrf_token;
@@ -49,13 +54,13 @@ export default defineContentScript({
         signal: AbortSignal.timeout(10_000),
       });
 
-      if (!tokenResp.ok) return; // 401 = not logged in, 429 = rate limited
+      if (!tokenResp.ok || !isJsonResponse(tokenResp)) return; // 401 = not logged in, 429 = rate limited
 
       const tokenData = await tokenResp.json();
       const token = tokenData?.data?.token;
 
-      // Validate token before storing — must be a non-empty string
-      if (typeof token !== 'string' || token.length === 0) return;
+      // Validate token: non-empty string within a sane length bound (INPUT-2)
+      if (typeof token !== 'string' || token.length === 0 || token.length > MAX_TOKEN_LENGTH) return;
 
       await browser.storage.session.set({
         [STORAGE_KEYS.token]:      token,
