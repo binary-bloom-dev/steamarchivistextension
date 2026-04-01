@@ -9,3 +9,14 @@ export const MAX_RETRIES = 3;
 export const RETRY_BASE_DELAY_MS = 2000;
 
 export const PARSER_VERSION = '1.0.0';
+
+// Namespaced session storage keys — prevents collisions with other extensions
+// or future features that might use the same plain-string keys.
+// Write access: site-bridge (token write), background (token clear)
+// Read access: content, background, popup (read-only)
+export const STORAGE_KEYS = {
+  token:      'sa:token',
+  acquiredAt: 'sa:acquired_at',
+  expiresIn:  'sa:expires_in',
+  acquiring:  'sa:acquiring', // mutex flag: prevents multi-tab acquisition races
+} as const;

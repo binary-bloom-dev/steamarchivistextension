@@ -8,23 +8,36 @@
  * This avoids any manual linking step — the extension "just works" once installed.
  */
 
+import { STORAGE_KEYS } from '@/lib/constants';
+
 export default defineContentScript({
   matches: ['https://steamarchivist.com/*'],
   runAt: 'document_idle',
 
   async main() {
-    const stored = await browser.storage.session.get('token');
-    if (stored.token) return;
+    // Check token and acquiring-lock in one read to prevent race conditions
+    // when multiple steamarchivist.com tabs open simultaneously (AUTH-1).
+    const stored = await browser.storage.session.get([
+      STORAGE_KEYS.token,
+      STORAGE_KEYS.acquiring,
+    ]);
+    if (stored[STORAGE_KEYS.token] || stored[STORAGE_KEYS.acquiring]) return;
+
+    // Claim the acquisition slot before any async work
+    await browser.storage.session.set({ [STORAGE_KEYS.acquiring]: true });
 
     try {
       // Fetch CSRF token first — needed for the POST request.
       // Cookies are included automatically since this script runs in the page's origin.
-      const csrfResp = await fetch('/auth/csrf', { credentials: 'include' });
+      const csrfResp = await fetch('/auth/csrf', {
+        credentials: 'include',
+        signal: AbortSignal.timeout(10_000),
+      });
       if (!csrfResp.ok) return;
 
       const csrfData = await csrfResp.json();
       const csrfToken = csrfData?.data?.csrf_token;
-      if (!csrfToken) return;
+      if (typeof csrfToken !== 'string' || csrfToken.length === 0) return;
 
       const tokenResp = await fetch('/api/v1/extension/token', {
         method: 'POST',
@@ -33,6 +46,7 @@ export default defineContentScript({
           'Content-Type': 'application/json',
           'X-CSRF-Token': csrfToken,
         },
+        signal: AbortSignal.timeout(10_000),
       });
 
       if (!tokenResp.ok) return; // 401 = not logged in, 429 = rate limited
@@ -40,16 +54,17 @@ export default defineContentScript({
       const tokenData = await tokenResp.json();
       const token = tokenData?.data?.token;
 
-      if (token) {
-        await browser.storage.session.set({
-          token,
-          acquired_at: Date.now(),
-          expires_in: tokenData.data.expires_in ?? 600,
-        });
-      }
-    } catch {
-      // Network error or not logged in — silently ignore.
-      // The script retries on every steamarchivist.com page load.
+      // Validate token before storing — must be a non-empty string
+      if (typeof token !== 'string' || token.length === 0) return;
+
+      await browser.storage.session.set({
+        [STORAGE_KEYS.token]:      token,
+        [STORAGE_KEYS.acquiredAt]: Date.now(),
+        [STORAGE_KEYS.expiresIn]:  tokenData.data.expires_in ?? 600,
+      });
+    } finally {
+      // Always release the lock so the next page load can retry if needed
+      await browser.storage.session.remove(STORAGE_KEYS.acquiring);
     }
   },
 });

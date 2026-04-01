@@ -2,7 +2,9 @@ import { extractSteamId } from '@/lib/steam-id';
 import { paginateHistory } from '@/lib/paginator';
 import { buildCsv, downloadCsv } from '@/lib/csv';
 import { injectExportUI } from '@/components/ui';
+import { STORAGE_KEYS } from '@/lib/constants';
 import type { SubmitHistoryMessage, SubmitHistoryResponse } from '@/lib/messages';
+import type { ParsedTransaction } from '@/lib/types';
 
 export default defineContentScript({
   matches: ['https://store.steampowered.com/account/history*'],
@@ -13,29 +15,49 @@ export default defineContentScript({
     if (!steamId) return; // Not logged in or page structure changed
 
     let exporting = false;
-    const abortController = new AbortController();
+    // Held per-click so that cancelling and re-exporting creates a fresh signal
+    // rather than leaving the AbortController permanently aborted (AUTH-3).
+    let currentAbort: AbortController | null = null;
 
-    const ui = injectExportUI(async () => {
-      if (exporting) return;
-      exporting = true;
+    const ui = injectExportUI(
+      // onClick
+      async () => {
+        if (exporting) return;
+        exporting = true;
+        currentAbort = new AbortController();
 
-      ui.setButtonEnabled(false);
-      ui.setButtonText('Exporting...');
+        ui.setButtonEnabled(false);
+        ui.setCancelVisible(true);
+        ui.setButtonText('Exporting...');
 
       try {
-        // Check that we have a token before starting the long pagination process
-        const stored = await browser.storage.session.get('token');
-        if (!stored.token) {
-          ui.setStatus('warning', 'Not linked to SteamArchivist. Visit steamarchivist.com while logged in, then try again.');
+        // Check token exists AND has not expired before starting the long
+        // pagination process (AUTH-2) — avoids wasting minutes on a stale token.
+        const stored = await browser.storage.session.get([
+          STORAGE_KEYS.token,
+          STORAGE_KEYS.acquiredAt,
+          STORAGE_KEYS.expiresIn,
+        ]);
+        const token = stored[STORAGE_KEYS.token];
+        const acquiredAt = stored[STORAGE_KEYS.acquiredAt] as number | undefined;
+        const expiresIn = (stored[STORAGE_KEYS.expiresIn] as number | undefined) ?? 600;
+        const isExpired = acquiredAt != null && Date.now() - acquiredAt > expiresIn * 1000;
+
+        if (!token || isExpired) {
+          const reason = isExpired
+            ? 'Token expired. Visit steamarchivist.com while logged in to refresh.'
+            : 'Not linked to SteamArchivist. Visit steamarchivist.com while logged in, then try again.';
+          ui.setStatus('warning', reason);
           ui.setButtonEnabled(true);
+          ui.setCancelVisible(false);
           ui.setButtonText('Export Full History to SteamArchivist');
           exporting = false;
           return;
         }
 
-        let allTransactions = [];
+        let allTransactions: ParsedTransaction[] = [];
 
-        for await (const progress of paginateHistory(abortController.signal)) {
+        for await (const progress of paginateHistory(currentAbort.signal)) {
           allTransactions = progress.transactions;
           ui.setProgress(progress.currentPage, progress.totalTransactions);
         }
@@ -43,6 +65,7 @@ export default defineContentScript({
         if (allTransactions.length === 0) {
           ui.setStatus('warning', 'No purchase history found.');
           ui.setButtonEnabled(true);
+          ui.setCancelVisible(false);
           ui.setButtonText('Export Full History to SteamArchivist');
           exporting = false;
           return;
@@ -90,15 +113,22 @@ export default defineContentScript({
         ui.setStatus('error', `Export failed: ${msg}. Check your CSV download for a local backup.`);
       } finally {
         ui.setButtonEnabled(true);
+        ui.setCancelVisible(false);
         ui.setButtonText('Export Full History to SteamArchivist');
         exporting = false;
       }
-    });
+    },
+    // onCancel
+    () => {
+      currentAbort?.abort();
+    },
+    );
 
     // Warn if navigating away during export
     window.addEventListener('beforeunload', (e) => {
       if (exporting) {
         e.preventDefault();
+        e.returnValue = ''; // required by some older Chromium builds
       }
     });
   },
